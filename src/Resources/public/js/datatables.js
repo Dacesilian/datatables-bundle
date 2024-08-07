@@ -8,13 +8,13 @@
  * @author Niels Keurentjes <niels.keurentjes@omines.com>
  */
 
-(function($) {
+(function ($) {
     /**
      * Initializes the datatable dynamically.
      */
-    $.fn.initDataTables = function(config, options) {
+    $.fn.initDataTables = function (config, options, initData = null) {
 
-        //Update default used url, so it reflects the current location (useful on single side apps)
+        // Update default used url, so it reflects the current location (useful on single side apps)
         $.fn.initDataTables.defaults.url = window.location.origin + window.location.pathname + window.location.search;
 
         var root = this,
@@ -28,11 +28,11 @@
         switch (config.state) {
             case 'fragment':
                 state = window.location.hash;
-                state = (state.length > 1 ? deparam(state.substring(1)) : {});
+                state = (state.length > 1 ? deparam(state.substr(1)) : {});
                 break;
             case 'query':
                 state = window.location.search;
-                state = (state.length > 1 ? deparam(state.substring(1)) : {});
+                state = (state.length > 1 ? deparam(state.substr(1)) : {});
                 break;
             case 'local':
                 stateDuration = 0
@@ -51,12 +51,18 @@
         var persistOptions = config.state === 'none' ? {} : {
             stateDuration: stateDuration,
             stateSave: true,
-            stateLoadCallback: function(s, cb) {
+            stateLoadCallback: function (s, cb) {
                 // Only need stateSave to expose state() function as loading lazily is not possible otherwise
                 return null;
             }
         };
 
+        if (typeof initData !== 'undefined' && initData != null) {
+            console.debug("initDataTables - using data from argument");
+            return $.fn.initDataTables.initDataLoaded(initData, root, config, options, persistOptions, state);
+        }
+
+        console.debug("initDataTables - loading data via AJAX");
         return new Promise((fulfill, reject) => {
             // Perform initial load
             $.ajax(typeof config.url === 'function' ? config.url(null) : config.url, {
@@ -65,78 +71,93 @@
                     _dt: config.name,
                     _init: true
                 }
-            }).done(function(data) {
-                var baseState;
-
-                // Merge all options from different sources together and add the Ajax loader
-                var dtOpts = $.extend({}, data.options, typeof config.options === 'function' ? {} : config.options, options, persistOptions, {
-                    ajax: function (request, drawCallback, settings) {
-                        if (data) {
-                            data.draw = request.draw;
-                            drawCallback(data);
-                            data = null;
-                            if (Object.keys(state).length) {
-                                var api = new $.fn.dataTable.Api( settings );
-                                var merged = Object.assign({}, api.state(), state)
-                                api
-                                    .order(Array.isArray(merged.order) && merged.order.length > 0 ? merged.order : api.state().order)
-                                    .search(merged.search.search)
-                                    .page.len(merged.length)
-                                    .page(merged.start / merged.length)
-                                    .draw(false);
-                            }
-                        } else {
-                            request._dt = config.name;
-                            $.ajax(typeof config.url === 'function' ? config.url(dt) : config.url, {
-                                method: config.method,
-                                data: request
-                            }).done(function(data) {
-                                drawCallback(data);
-                            })
-                        }
-                    }
-                });
-
-                if (typeof config.options === 'function') {
-                    dtOpts = config.options(dtOpts);
-                }
-
-                root.html(data.template);
-                var dt = $('table', root).DataTable(dtOpts);
-                if (config.state !== 'none') {
-                    dt.on('draw.dt', function(e) {
-                        var data = $.param(dt.state()).split('&');
-                        // First draw establishes state, subsequent draws run diff on the first
-                        if (!baseState) {
-                            baseState = data;
-                        } else {
-                            var diff = data.filter(el => { return baseState.indexOf(el) === -1 && el.indexOf('time=') !== 0; });
-                            switch (config.state) {
-                                case 'fragment':
-                                    history.replaceState(null, null, window.location.origin + window.location.pathname + window.location.search
-                                        + '#' + decodeURIComponent(diff.join('&')));
-                                    break;
-                                case 'query':
-                                    var windowLocationSearch = deparam(decodeURIComponent(diff.join('&')))
-                                    if(window.location.search !== null) {
-                                        windowLocationSearch = deparam(window.location.search.substring(1))
-                                        Object.assign(windowLocationSearch, deparam(decodeURIComponent(diff.join('&'))))
-                                    }
-                                    history.replaceState(null, null, window.location.origin + window.location.pathname
-                                        + '?' + decodeURIComponent($.param(windowLocationSearch) + window.location.hash));
-                                    break;
-                            }
-                        }
-                    })
-                }
-
+            }).done(async function (data) {
+                await $.fn.initDataTables.initDataLoaded(data, root, config, options, persistOptions, state);
                 fulfill(dt);
-            }).fail(function(xhr, cause, msg) {
+            }).fail(function (xhr, cause, msg) {
                 console.error('DataTables request failed: ' + msg);
                 reject(cause);
             });
         });
     };
+
+    $.fn.initDataTables.initDataLoaded = async function (data, root, config, options, persistOptions, state) {
+        var baseState;
+
+        // Merge all options from different sources together and add the Ajax loader
+        var dtOpts = $.extend({}, data.options, typeof config.options === 'function' ? {} : config.options, options, persistOptions, {
+            ajax: function (request, drawCallback, settings) {
+                if (data) {
+                    data.draw = request.draw;
+                    drawCallback(data);
+                    data = null;
+                    if (Object.keys(state).length) {
+                        var api = new $.fn.dataTable.Api(settings);
+                        var merged = Object.assign({}, api.state(), state)
+                        api
+                            .order(Array.isArray(merged.order) && merged.order.length > 0 ? merged.order : api.state().order)
+                            .search(merged.search.search)
+                            .page.len(merged.length)
+                            .page(merged.start / merged.length)
+                            .draw(false);
+                    }
+                } else {
+                    if ('onAjaxData' in options) {
+                        request = options.onAjaxData(request);
+                    }
+                    request._dt = config.name;
+                    $.ajax(typeof config.url === 'function' ? config.url(dt) : config.url, {
+                        method: config.method,
+                        data: request
+                    }).done(function (data) {
+                        drawCallback(data);
+                    })
+                }
+            }
+        });
+
+        if (typeof config.options === 'function') {
+            dtOpts = config.options(dtOpts);
+        }
+
+        if (dtOpts.layout) {
+            delete dtOpts.dom;
+            delete dtOpts.sDom;
+        }
+
+        root.html(data.template);
+        dt = $('table', root).DataTable(dtOpts);
+        $('table', root)[0].datatable = dt;
+
+        if (config.state !== 'none') {
+            dt.on('draw.dt', function (e) {
+                var data = $.param(dt.state()).split('&');
+                // First draw establishes state, subsequent draws run diff on the first
+                if (!baseState) {
+                    baseState = data;
+                } else {
+                    var diff = data.filter(el => {
+                        return baseState.indexOf(el) === -1 && el.indexOf('time=') !== 0;
+                    });
+                    switch (config.state) {
+                        case 'fragment':
+                            history.replaceState(null, null, window.location.origin + window.location.pathname + window.location.search
+                                + '#' + decodeURIComponent(diff.join('&')));
+                            break;
+                        case 'query':
+                            var windowLocationSearch = deparam(decodeURIComponent(diff.join('&')))
+                            if (window.location.search !== null) {
+                                windowLocationSearch = deparam(window.location.search.substr(1))
+                                Object.assign(windowLocationSearch, deparam(decodeURIComponent(diff.join('&'))))
+                            }
+                            history.replaceState(null, null, window.location.origin + window.location.pathname
+                                + '?' + decodeURIComponent($.param(windowLocationSearch) + window.location.hash));
+                            break;
+                    }
+                }
+            })
+        }
+    }
 
     /**
      * Provide global component defaults.
@@ -150,15 +171,18 @@
     /**
      * Server-side export.
      */
-    $.fn.initDataTables.exportBtnAction = function(exporterName, settings) {
+    $.fn.initDataTables.exportBtnAction = function (exporterName, settings) {
         settings = $.extend({}, $.fn.initDataTables.defaults, settings);
 
-        return function(e, dt) {
-            const params = $.param($.extend({}, dt.ajax.params(), {'_dt': settings.name, '_exporter': exporterName}));
+        return function (e, dt) {
+            const params = $.param($.extend({}, dt.ajax.params(), {
+                '_dt': settings.name,
+                '_exporter': exporterName
+            }));
 
             // Credit: https://stackoverflow.com/a/23797348
             const xhr = new XMLHttpRequest();
-            xhr.open(settings.method, settings.method === 'GET' ? (settings.url + '?' +  params) : settings.url, true);
+            xhr.open(settings.method, settings.method === 'GET' ? (settings.url + '?' + params) : settings.url, true);
             xhr.responseType = 'arraybuffer';
             xhr.onload = function () {
                 if (this.status === 200) {
@@ -177,36 +201,42 @@
                     let blob;
                     if (typeof File === 'function') {
                         try {
-                            blob = new File([this.response], filename, { type: type });
-                        } catch (e) { /* Edge */ }
+                            blob = new File([this.response], filename, {type: type});
+                        } catch (e) { /* Edge */
+                        }
                     }
 
                     if (typeof blob === 'undefined') {
-                        blob = new Blob([this.response], { type: type });
+                        blob = new Blob([this.response], {type: type});
                     }
 
-                    const URL = window.URL || window.webkitURL;
-                    const downloadUrl = URL.createObjectURL(blob);
+                    if (typeof window.navigator.msSaveBlob !== 'undefined') {
+                        // IE workaround for "HTML7007: One or more blob URLs were revoked by closing the blob for which they were created. These URLs will no longer resolve as the data backing the URL has been freed."
+                        window.navigator.msSaveBlob(blob, filename);
+                    } else {
+                        const URL = window.URL || window.webkitURL;
+                        const downloadUrl = URL.createObjectURL(blob);
 
-                    if (filename) {
-                        // use HTML5 a[download] attribute to specify filename
-                        const a = document.createElement("a");
-                        // safari doesn't support this yet
-                        if (typeof a.download === 'undefined') {
+                        if (filename) {
+                            // use HTML5 a[download] attribute to specify filename
+                            const a = document.createElement("a");
+                            // safari doesn't support this yet
+                            if (typeof a.download === 'undefined') {
+                                window.location = downloadUrl;
+                            } else {
+                                a.href = downloadUrl;
+                                a.download = filename;
+                                document.body.appendChild(a);
+                                a.click();
+                            }
+                        } else {
                             window.location = downloadUrl;
                         }
-                        else {
-                            a.href = downloadUrl;
-                            a.download = filename;
-                            document.body.appendChild(a);
-                            a.click();
-                        }
-                    }
-                    else {
-                        window.location = downloadUrl;
-                    }
 
-                    setTimeout(function() { URL.revokeObjectURL(downloadUrl); }, 100); // cleanup
+                        setTimeout(function () {
+                            URL.revokeObjectURL(downloadUrl);
+                        }, 100); // cleanup
+                    }
                 }
             };
 
@@ -220,7 +250,11 @@
      */
     function deparam(params, coerce) {
         var obj = {},
-            coerce_types = {'true': !0, 'false': !1, 'null': null};
+            coerce_types = {
+                'true': !0,
+                'false': !1,
+                'null': null
+            };
         $.each(params.replace(/\+/g, ' ').split('&'), function (j, v) {
             var param = v.split('='),
                 key = decodeURIComponent(param[0]),
@@ -230,8 +264,8 @@
                 keys = key.split(']['),
                 keys_last = keys.length - 1;
 
-            if (/\[/.test(keys[0]) && /]$/.test(keys[keys_last])) {
-                keys[keys_last] = keys[keys_last].replace(/]$/, '');
+            if (/\[/.test(keys[0]) && /\]$/.test(keys[keys_last])) {
+                keys[keys_last] = keys[keys_last].replace(/\]$/, '');
                 keys = keys.shift().split('[').concat(keys);
                 keys_last = keys.length - 1;
             } else {
