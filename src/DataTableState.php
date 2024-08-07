@@ -34,6 +34,8 @@ final class DataTableState
     /** @var OrderColumn[] */
     private array $orderBy = [];
 
+    private ?ParameterBag $parameters = null;
+
     private bool $isInitial = false;
     private bool $isCallback = false;
     private ?string $exporterName;
@@ -52,8 +54,8 @@ final class DataTableState
     public static function fromDefaults(DataTable $dataTable): static
     {
         $state = new static($dataTable);
-        $state->start = (int) $dataTable->getOption('start');
-        $state->length = (int) $dataTable->getOption('pageLength');
+        $state->start = (int)$dataTable->getOption('start');
+        $state->length = (int)$dataTable->getOption('pageLength');
 
         foreach ($dataTable->getOption('order') as $order) {
             $state->addOrderBy($dataTable->getColumn($order[0]), $order[1]);
@@ -67,13 +69,14 @@ final class DataTableState
      */
     public function applyParameters(ParameterBag $parameters): void
     {
+        $this->parameters = $parameters;
         $this->draw = $parameters->getInt('draw');
         $this->isCallback = true;
         $this->isInitial = $parameters->getBoolean('_init', false);
         $this->exporterName = $parameters->get('_exporter');
 
-        $this->start = (int) $parameters->get('start', $this->start);
-        $this->length = (int) $parameters->get('length', $this->length);
+        $this->start = (int)$parameters->get('start', $this->start);
+        $this->length = (int)$parameters->get('length', $this->length);
 
         // DataTables insists on using -1 for infinity
         if ($this->length < 1) {
@@ -87,12 +90,17 @@ final class DataTableState
         $this->handleSearch($parameters);
     }
 
+    public function getParameters(): ?ParameterBag
+    {
+        return $this->parameters;
+    }
+
     private function handleOrderBy(ParameterBag $parameters): void
     {
         if ($parameters->has('order')) {
             $this->orderBy = [];
             foreach ($parameters->all()['order'] ?? [] as $order) {
-                $column = $this->getDataTable()->getColumn((int) $order['column']);
+                $column = $this->getDataTable()->getColumn((int)$order['column']);
                 $this->addOrderBy($column, $order['dir'] ?? DataTable::SORT_ASCENDING);
             }
         }
@@ -101,7 +109,7 @@ final class DataTableState
     private function handleSearch(ParameterBag $parameters): void
     {
         foreach ($parameters->all()['columns'] ?? [] as $key => $search) {
-            $column = $this->dataTable->getColumn((int) $key);
+            $column = $this->dataTable->getColumn((int)$key);
             $value = $this->isInitial ? $search : $search['search']['value'] ?? '';
 
             if ($column->isSearchable() && ('' !== trim($value))) {
