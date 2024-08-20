@@ -30,14 +30,19 @@ class DataTablesExtension extends AbstractExtension
     {
         return [
             new TwigFunction('datatable_settings', function (DataTable $dataTable) {
-                return json_encode([
+                $out = [
                     'name' => $dataTable->getName(),
                     'method' => $dataTable->getMethod(),
                     'state' => $dataTable->getPersistState(),
                     'options' => [
                         'language' => $this->getLanguageSettings($dataTable),
                     ],
-                ]);
+                ];
+                $url = $dataTable->getOption("url");
+                if (!empty($url)) {
+                    $out["url"] = $url;
+                }
+                return json_encode($out);
             }, ['is_safe' => ['html']]),
         ];
     }
