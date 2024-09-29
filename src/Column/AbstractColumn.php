@@ -93,6 +93,7 @@ abstract class AbstractColumn
         $resolver
             ->setDefaults([
                 'label' => null,
+                'labelRaw' => false,
                 'data' => null,
                 'field' => null,
                 'propertyPath' => null,
@@ -109,6 +110,7 @@ abstract class AbstractColumn
                 'rightExpr' => null,
             ])
             ->setAllowedTypes('label', ['null', 'string'])
+            ->setAllowedTypes('labelRaw', 'boolean')
             ->setAllowedTypes('data', ['null', 'string', 'callable'])
             ->setAllowedTypes('field', ['null', 'string'])
             ->setAllowedTypes('propertyPath', ['null', 'string'])
@@ -161,6 +163,11 @@ abstract class AbstractColumn
     public function isVisible(): bool
     {
         return $this->options['visible'];
+    }
+
+    public function isLabelRaw(): bool
+    {
+        return $this->options['labelRaw'];
     }
 
     public function isSearchable(): bool
