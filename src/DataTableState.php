@@ -54,8 +54,8 @@ final class DataTableState
     public static function fromDefaults(DataTable $dataTable): static
     {
         $state = new static($dataTable);
-        $state->start = (int)$dataTable->getOption('start');
-        $state->length = (int)$dataTable->getOption('pageLength');
+        $state->start = (int) $dataTable->getOption('start');
+        $state->length = (int) $dataTable->getOption('pageLength');
 
         foreach ($dataTable->getOption('order') as $order) {
             $state->addOrderBy($dataTable->getColumn($order[0]), $order[1]);
@@ -75,8 +75,8 @@ final class DataTableState
         $this->isInitial = $parameters->getBoolean('_init', false);
         $this->exporterName = $parameters->get('_exporter');
 
-        $this->start = (int)$parameters->get('start', $this->start);
-        $this->length = (int)$parameters->get('length', $this->length);
+        $this->start = (int) $parameters->get('start', $this->start);
+        $this->length = (int) $parameters->get('length', $this->length);
 
         // DataTables insists on using -1 for infinity
         if ($this->length < 1) {
@@ -100,8 +100,12 @@ final class DataTableState
         if ($parameters->has('order')) {
             $this->orderBy = [];
             foreach ($parameters->all()['order'] ?? [] as $order) {
-                $column = $this->getDataTable()->getColumn((int)$order['column']);
-                $this->addOrderBy($column, $order['dir'] ?? DataTable::SORT_ASCENDING);
+                try {
+                    $column = $this->getDataTable()->getColumn((int) $order['column']);
+                    $this->addOrderBy($column, $order['dir'] ?? DataTable::SORT_ASCENDING);
+                } catch (\Throwable $t) {
+                    // Column index and direction can be corrupted by malicious clients, ignore any exceptions thus caused
+                }
             }
         }
     }
@@ -109,7 +113,7 @@ final class DataTableState
     private function handleSearch(ParameterBag $parameters): void
     {
         foreach ($parameters->all()['columns'] ?? [] as $key => $search) {
-            $column = $this->dataTable->getColumn((int)$key);
+            $column = $this->dataTable->getColumn((int) $key);
             $value = $this->isInitial ? $search : $search['search']['value'] ?? '';
 
             // We do not check for $column->isSearchable() here, because at this point the
@@ -189,6 +193,10 @@ final class DataTableState
 
     public function addOrderBy(AbstractColumn $column, string $direction = DataTable::SORT_ASCENDING): static
     {
+        $direction = mb_strtolower($direction);
+        if (!in_array($direction, DataTable::SORT_OPTIONS, true)) {
+            throw new \InvalidArgumentException(sprintf('Sort direction must be one of %s', implode(', ', DataTable::SORT_OPTIONS)));
+        }
         $this->orderBy[] = [$column, $direction];
 
         return $this;
@@ -207,7 +215,10 @@ final class DataTableState
      */
     public function setOrderBy(array $orderBy = []): static
     {
-        $this->orderBy = $orderBy;
+        $this->orderBy = [];
+        foreach ($orderBy as [$column, $direction]) {
+            $this->addOrderBy($column, $direction);
+        }
 
         return $this;
     }
